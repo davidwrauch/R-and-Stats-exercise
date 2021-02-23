@@ -1,0 +1,273 @@
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(moments)
+library(ggpubr)
+library(lubridate)
+
+homework_data_set <-read_csv("homework_data_set.csv")
+View(homework_data_set)
+names(homework_data_set)
+str(homework_data_set)
+class(homework_data_set)
+
+#replace NAs w 0 for numeric columns
+homework_data_set <-homework_data_set %>%
+  mutate_if(is.numeric, ~replace_na(., 0))
+
+#figure out what age and assign days are
+
+#data diff of date date_created and date_assignment_starts
+difftime("2017-02-01","2006-07-14", units = c("days"))
+#age is time between date_created and date_assignment_starts
+
+#date diff of date_assignment_starts and date_assignment_ends
+difftime("2017-06-19","2017-02-01", units = c("days"))
+# assign_days is time between date_assignment_ends and date_assignment_starts
+
+#Question 1 - how many leads were created
+lead_num <- n_distinct(homework_data_set$advertiser_id)
+lead_num 
+#77,891 leads
+
+#how many leads were assigned and not assigned
+homework_data_set_assigned_num = homework_data_set %>% 
+  group_by(assigned) %>% 
+  summarise(num_per_assigned = n_distinct(advertiser_id))
+homework_data_set_assigned_num
+#40,812 not assigned, 37,079 assigned
+
+# chart to see assigned vs unassigned
+homework_data_set %>%
+  group_by(assigned) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(x = assigned, y = n, fill = assigned)) +
+  geom_col(position = position_dodge())
+
+#what's the average age of a lead whether it's assigned or not
+homework_data_set_assigned_age = homework_data_set %>% 
+  group_by(assigned) %>% 
+  summarise(avg_age_per_assigned = mean(age))
+homework_data_set_assigned_age
+# 638 average age for unassigned, 12 days age for assigned
+
+#what's the median age of a lead whether it's assigned or not
+homework_data_set_assigned_age_median = homework_data_set %>% 
+  group_by(assigned) %>% 
+  summarise(median_age_per_assigned = median(age))
+homework_data_set_assigned_age_median
+# 544 average age for unassigned, 0 days age for assigned
+
+#how much revenue on average for someone who is assigned or not
+homework_data_set_assigned_rev = homework_data_set %>% 
+  group_by(assigned) %>% 
+  summarise(avg_rev_per_assigned = mean(revenue))
+homework_data_set_assigned_rev
+# $1,039,001 average revenue for unassigned, $3,238,846 for assigned
+
+
+##########Question 2 - what relationship does age have with revenue
+
+#explore distribution of age
+age_hist <- ggplot(homework_data_set , aes(x=age)) + 
+  geom_histogram()
+age_hist
+#most advertisers have an age of 0, not normal distribution
+
+#explore distribution of age, more than 0
+age_hist_no_0 <- ggplot(homework_data_set  %>%   filter( age>0), aes(x=age)) + 
+  geom_histogram()
+age_hist_no_0
+#most advertisers have an age of 0, not normal distribution
+
+#explore distribution of revenue
+revenue_hist <- ggplot(homework_data_set, aes(x=revenue)) + 
+  geom_histogram() + labs(
+    y="Number of leads", x = "revenue") +
+  scale_x_continuous(labels=scales::dollar_format())
+revenue_hist
+#very skewed
+
+#explore distribution of revenue data using histogram, very skewed even when getting rid of all 0 advertisers
+revenue_hist_no_0 <- ggplot(homework_data_set %>%   filter( revenue>0) , aes(x=revenue)) + 
+  geom_histogram() + labs(
+    y="Number of leads", x = "revenue") +
+  scale_x_continuous(labels=scales::dollar_format())
+revenue_hist_no_0
+
+# make a scatterplot of age and revenue
+age_and_rev_scatter <- ggplot(homework_data_set, aes(x=age, y=revenue)) + geom_point() +
+  scale_y_continuous(labels=scales::dollar_format())
+age_and_rev_scatter
+# see one very strange outlier of $6 billion at 0 age, which is 4 times bigger than any other advertiser, curious, otherwise no obvious pattern/relationship visible. I am not taking out the data as an outlier until I have a conversation about whether that's an error, but I will use non-parametric stats tests which handle outliers better
+
+#wanted to see if a pattern emerges if I get rid of advertisers w 0 revenue
+ggplot(homework_data_set %>% filter (revenue>0), aes(x=age, y=revenue)) + geom_point()
+#no strong pattern emerges
+
+#test skew to see what kind of statistical test can be done
+skewness(homework_data_set$age)
+# 1.69 - highly skewed
+#If the skewness is between -0.5 and 0.5, the data are fairly symmetrical.
+#If the skewness is between -1 and – 0.5 or between 0.5 and 1, the data are moderately skewed.
+#If the skewness is less than -1 or greater than 1, the data are highly skewed.
+
+# find if there is a statistically significant relationship between age and revenue. Use spearman correlation bc it's non-parametric and does not rest upon an assumption of normality, as the variables aren't normally distributed
+stat_age_rev <-cor.test(homework_data_set$revenue, homework_data_set$age,  method = "spearman")
+stat_age_rev
+#p value is below .05, so the relationship is stat sig
+#r is -.03
+
+#I also used the pearson correlation to find the strength of the relationship and that is a good test to use when variables are not normally distributed
+age_rev_corr <- cor.test(homework_data_set$revenue, homework_data_set$age, 
+                method = "pearson")
+age_rev_corr
+#the correlation is .027, which is incredibly low. So while there is a statistically significant relationship between age and reveue, it is very small in its predictive quality
+
+
+
+#Question 3- what's the impact of having a sales agent assigned to a lead?
+#From Question 1, $1,039,001 average revenue for unassigned, $3,238,846 for assigned
+
+# % change calculation using average revenue for assigned vs unassigned, values from above
+(3238846-1039001)/1039001
+# This says that advertisers with someone assigned make 2.1x more revenue on average than an un-assigned advertiser. However, I want to see if this is statistically significant and explore further
+
+# took median of revenue if someone was assigned or not
+homework_data_set_assigned_rev_median = homework_data_set %>% 
+  group_by(assigned) %>% 
+  summarise(median_rev_per_assigned = median(revenue))
+homework_data_set_assigned_rev_median
+# median is 0 because there are so many 0 values, so will look at this taking 0s out next, though this makes my faith/interest in this analysis much lower bc by removing 0s, we are changing the nature of the data a lot
+
+homework_data_set_assigned_rev_median_no_0
+# unassigned median revenue for people with more than 0 revenue is $12,353,345, assigned is $23,180,091
+
+(23180091-12353345)/12353345
+#looking at the median (with people who have more than $0 revenue), assigned advertisers have an 87% relative higher revenue than unassigned advertisers. Still I take this with a grain of salt bc removing people with 0 revenue distorts reality.
+
+
+# I want to determine if there is a statistically significant impact of having an advertiser be assigned to a sales person. First I explore the distribution of revenue data using histogram
+revenue_hist
+# the hisogram is very skewed, means I will have to use a Wilcox test for stat sig, not a standard t-test
+
+#explore distribution of revenue data using histogram, very skewed even when getting rid of all 0 advertisers
+revenue_hist_no_0 <- ggplot(homework_data_set %>%   filter( revenue>0) , aes(x=revenue)) + 
+  geom_histogram()
+revenue_hist_no_0
+#still very skewed
+
+#I am testing if there is a statistically significant difference in revenue if an advertiser is assigned or not, and I used a Wilcox test because the revenue data has a very skewed distribution. There is not a statistically signficant difference between the revenue for advertisers who are assigned vs not assigned
+rev_assign_relate <- wilcox.test(revenue ~ assigned, data = homework_data_set,
+                                 exact = FALSE)
+rev_assign_relate
+
+#I just used a t-test here to show that if we used a t-test (assuming normal distribution), which would be a mistake
+rev_assign_relate_t <- t.test(revenue ~ assigned, data = homework_data_set)
+rev_assign_relate_t
+#The difference is stat sig in the t-test. We would be given the false impression that the difference between the revenue for advertisers who are assigned vs not assigned is statistically significant
+
+#using pearson correlation to detect the strength of the relationship between being assigned and revenue. We can use Pearson because it does not assume normal distribution.
+assign_rev_corr <- cor.test(homework_data_set$revenue, homework_data_set$assigned, 
+                                        method = "pearson")
+assign_rev_corr
+#the result is stat sig but the r value is .03, very very low
+
+# Ever unsatisfied, I am curious about whether the business has changed over time, let's explore date created and revenue
+date_created_and_rev <- ggplot(homework_data_set, aes(x=date_created, y=revenue)) +
+  geom_line() + 
+  xlab("")+ labs(
+    y="revenue", x = "date") +
+  scale_y_continuous(labels=scales::dollar_format())
+date_created_and_rev
+# there is a very large amount of revenue generated at the beginning of Feb
+
+#what dates exactly?
+homework_data_set_date_created_and_rev = homework_data_set %>% 
+  group_by(date_created) %>% 
+  summarise(rev = sum(revenue))
+View(homework_data_set_date_created_and_rev)
+#2017-02-01	$21495345378
+#2017-02-02	$18940364507
+#2017-02-03	$13185410152
+
+#were there also lots of accounts created then?
+homework_data_set_date_created_and_count = homework_data_set %>% 
+  group_by(date_created) %>% 
+  summarise(num_per_assigned = n_distinct(advertiser_id))
+View(homework_data_set_date_created_and_count)
+#yes many accounts were created 2017-02-01 (18,074 and 2017-02-02	(17,794), what happened? I will run my correlation/stat sig analysis just filtering for pre Feb 1, 2017 because that makes up a very small amount of the time of the dataset but a lot of its revenue and advertising account creation
+
+#I am testing if there is a statistically significant difference in revenue if an advertiser is assigned or not in the days before Feb 1, 2017, where there seemed to be a big change in how many advertisers there were and revenue. 
+rev_assign_relate_date_filter <- wilcox.test(revenue ~ assigned, data = homework_data_set %>%  filter(date_created < '2017-02-01'),
+                                             exact = FALSE)
+rev_assign_relate_date_filter
+#There is a statistically significant difference between the revenue for advertisers who are assigned vs not assigned for all advertisers before Feb 1,2017, in contrast to if I included the whole timeline, which was not stat sig. Interesting to note, for discussion.
+
+
+
+
+########Question 4 - Anything else?
+#explore distribution of assigned days
+assign_days_hist <- ggplot(homework_data_set , aes(x=assign_days)) + 
+  geom_histogram()
+assign_days_hist
+# a vast majority of advertisters who have been assigned for 136, 137 and 138 days, why?
+
+lead_num_over_135_days <- homework_data_set %>% filter(assign_days>135) %>%  nrow
+lead_num_over_135_days
+#64,560 advertisters have a assigned days of 135, 136, or 138. Out of 77,891, why?
+
+skewness(homework_data_set$assign_days)
+# -2.1 - highly negatively skewed
+#If the skewness is between -0.5 and 0.5, the data are fairly symmetrical.
+#If the skewness is between -1 and – 0.5 or between 0.5 and 1, the data are moderately skewed.
+#If the skewness is less than -1 or greater than 1, the data are highly skewed.
+
+# make a scatterplot of assign days and revenue
+ggplot(homework_data_set, aes(x=assign_days, y=revenue)) + geom_point()
+# there are a couple interesting spikes in revenue associated with around 55 days and 138 days, could investigate further
+
+# find if there is a statistically significant relationship between assigned days and revenue. Use spearman correlation bc it's non-parametric and does not rest upon an assumption of normality, as the variables aren't normally distributed
+corr_assign_days_rev <-cor.test(homework_data_set$revenue, homework_data_set$assign_days,  method = "spearman")
+corr_assign_days_rev
+#p value is below .05, so the relationship is stat sig, but the r is very small and negative -.09
+
+#I wanted to see if there is a relationship between assigned days and reveue among advertisers who are assigned, so I filter to only see those who are assigned and run the correlation between days assigned and revenue again
+homework_data_set_assign <- homework_data_set %>% filter(assigned ==1)
+View(homework_data_set_assign)
+
+res_assign_days_only_assigned <- cor.test(homework_data_set_assign$revenue, homework_data_set_assign$assign_days, 
+                            method = "pearson")
+res_assign_days_only_assigned
+#the correlation is .009, which is incredibly low. So while there is a statistically significant relationship between assigned days and reveue among advertisers who are assigned, it is very small in its predictive quality
+
+
+
+#investigate if average revenue has changed over time, per year
+date_created_and_avg_rev <- homework_data_set %>% 
+  mutate(year=year(date_created)) %>% 
+  group_by(year) %>% 
+  summarise(
+    avg_rev = mean(revenue))
+View(date_created_and_avg_rev)
+
+#this is a function needed to create whole number/integer breaks in the chart below for years
+integer_breaks <- function(n = 5, ...) {
+  fxn <- function(x) {
+    breaks <- floor(pretty(x, n, ...))
+    names(breaks) <- attr(breaks, "labels")
+    breaks
+  }
+  return(fxn)
+}
+
+#make a chart
+date_created_and_avg_rev_chart <- ggplot(date_created_and_avg_rev, aes(x=year, y=avg_rev)) +
+  geom_line() + 
+  xlab("")+ labs(
+    y="revenue", x = "year") +
+  scale_y_continuous(labels=scales::dollar_format(), breaks= integer_breaks()) +
+  scale_x_continuous( breaks= integer_breaks())
+#average revenue has decreased significantly
+date_created_and_avg_rev_chart
